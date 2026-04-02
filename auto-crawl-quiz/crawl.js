@@ -1,240 +1,265 @@
 const { chromium } = require("playwright");
-const fs = require("fs");
+
+function normalizeText(text) {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\u0111/g, "d")
+    .replace(/\u0110/g, "D")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+async function getNormalizedBodyText(page) {
+  const bodyText = await page.locator("body").innerText();
+  return normalizeText(bodyText);
+}
+
+async function waitForQuestion(page, questionNumber, timeout = 5000) {
+  const pattern = new RegExp(`\\bcau(?: hoi)?\\s*${questionNumber}(?:\\s*/\\s*\\d+)?\\b`, "i");
+
+  return await page
+    .waitForFunction(
+      ({ source }) => {
+        const text = (document.body?.innerText || "")
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/\u0111/g, "d")
+          .replace(/\u0110/g, "D")
+          .replace(/\s+/g, " ")
+          .trim()
+          .toLowerCase();
+
+        return new RegExp(source, "i").test(text);
+      },
+      { source: pattern.source },
+      { timeout },
+    )
+    .then(() => true)
+    .catch(() => false);
+}
+
+async function detectTotalQuestions(page) {
+  const normalizedText = await getNormalizedBodyText(page);
+  const totalMatch =
+    normalizedText.match(/cau(?: hoi)?\s*\d+\s*\/\s*(\d+)/i) ||
+    normalizedText.match(/so\s*cau\s*hoi\s*:?\s*(\d+)/i);
+
+  return totalMatch ? Number(totalMatch[1]) : null;
+}
+
+async function isVisible(locator) {
+  return await locator.isVisible().catch(() => false);
+}
+
+async function isEnabled(locator) {
+  return await locator.isEnabled().catch(() => false);
+}
+
+async function clickFirstAnswer(page) {
+  const firstOption = page.getByText(/^1\./).first();
+  await firstOption.waitFor({ state: "visible", timeout: 3000 });
+  await firstOption.click({ timeout: 3000 });
+}
+
+async function clickControlByNormalizedText(page, phrases, options = {}) {
+  const controls = page.locator('button, a, [role="button"], input[type="button"], input[type="submit"]');
+  const count = await controls.count();
+
+  for (let index = 0; index < count; index += 1) {
+    const control = controls.nth(index);
+    const visible = await isVisible(control);
+    const enabled = await isEnabled(control);
+
+    if (!visible || !enabled) {
+      continue;
+    }
+
+    const rawText = await control.innerText().catch(() => "");
+    const valueText = !rawText
+      ? await control.getAttribute("value").catch(() => "")
+      : "";
+    const labelText = [rawText, valueText].filter(Boolean).join(" ");
+    const normalizedLabel = normalizeText(labelText);
+
+    if (phrases.some((phrase) => normalizedLabel.includes(phrase))) {
+      await control.click(options);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function hasControlByNormalizedText(page, phrases) {
+  const controls = page.locator('button, a, [role="button"], input[type="button"], input[type="submit"]');
+  const count = await controls.count();
+
+  for (let index = 0; index < count; index += 1) {
+    const control = controls.nth(index);
+    const visible = await isVisible(control);
+    const enabled = await isEnabled(control);
+
+    if (!visible || !enabled) {
+      continue;
+    }
+
+    const rawText = await control.innerText().catch(() => "");
+    const valueText = !rawText
+      ? await control.getAttribute("value").catch(() => "")
+      : "";
+    const labelText = [rawText, valueText].filter(Boolean).join(" ");
+    const normalizedLabel = normalizeText(labelText);
+
+    if (phrases.some((phrase) => normalizedLabel.includes(phrase))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function clickNextAndWait(page, nextQuestionNumber) {
+  const clicked = await clickControlByNormalizedText(
+    page,
+    ["luu cau tra loi va tiep tuc", "luu va tiep tuc", "tiep tuc"],
+    { noWaitAfter: true, timeout: 3000 },
+  );
+
+  if (!clicked) {
+    return false;
+  }
+
+  if (await waitForQuestion(page, nextQuestionNumber, 2500)) {
+    return true;
+  }
+
+  return await waitForQuestion(page, nextQuestionNumber, 1500);
+}
 
 (async () => {
   const browser = await chromium.launch({ headless: false });
   const context = await browser.newContext();
   const page = await context.newPage();
 
-  console.log("Đang mở trang web...");
-  await page.goto(
-    "https://lms.uniapp.vn/elearning/student/test/128?m=549&c=82",
-  );
+  console.log("Dang mo trang web...");
+  await page.goto("https://lms.uniapp.vn/elearning/student/test/128?m=549&c=82");
 
   console.log("--------------------------------------------------");
-  console.log("Vui lòng đăng nhập và đi đến màn hình CÂU HỎI SỐ 1.");
-  console.log("Sau đó sang Playwright Inspector bấm nút 'Resume' (Play).");
+  console.log("Dang nhap va di den man hinh cau hoi so 1.");
+  console.log("Sau do sang Playwright Inspector bam nut Resume.");
   console.log("--------------------------------------------------");
 
   await page.pause();
 
-  const results = [];
   let quizRound = 1;
 
   while (true) {
     try {
       console.log(`================ DE ${quizRound} ================`);
 
-      let totalQuestions = null;
+      await waitForQuestion(page, 1, 10000);
 
-      // Thu lay tong so cau tu dang hien thi "Câu X/Y" hoac "Câu hỏi X/Y"
-      const headerText = await page.innerText("body");
-      const totalMatch =
-        headerText.match(/Câu(?:\s+hỏi)?\s*\d+\s*\/\s*(\d+)/i) ||
-        headerText.match(/S[ốo]\s*c[âa]u\s*h[ỏo]i\s*:?[\s\u00A0]*(\d+)/i);
-      if (totalMatch) {
-        totalQuestions = Number(totalMatch[1]);
+      const totalQuestions = await detectTotalQuestions(page);
+      if (totalQuestions) {
         console.log(`Tong so cau tu dong nhan dien: ${totalQuestions}`);
       } else {
-        console.log("Khong doc duoc tong so cau tu header, se tu dong lam den khi het nut tiep tuc.");
+        console.log("Khong doc duoc tong so cau, se lam den khi khong con nut tiep tuc.");
       }
 
-      // Bắt đầu cào từ Câu 1, nếu không biết tổng thì chạy đến khi hết nút tiếp tục
-      let i = 1;
+      let questionNumber = 1;
       let answeredCount = 0;
       let canAutoSubmit = false;
 
-      while (totalQuestions ? i <= totalQuestions : true) {
-      console.log(`Đang xử lý câu ${i}...`);
+      while (totalQuestions ? questionNumber <= totalQuestions : true) {
+        console.log(`Dang xu ly cau ${questionNumber}...`);
 
-      const questionPattern = new RegExp(
-        `Câu(?:\\s+hỏi)?\\s*${i}(?:\\s*\\/\\s*\\d+)?`,
-        "i",
-      );
-      const questionLabel = page.getByText(questionPattern).first();
-      const questionVisible = await questionLabel
-        .waitFor({ state: "visible", timeout: 10000 })
-        .then(() => true)
-        .catch(() => false);
-
-      if (!questionVisible) {
-        console.log(`⚠️ Không tìm thấy Câu ${i}, dừng để tránh chạy quá số câu thực tế.`);
-        break;
-      }
-
-      // BƯỚC 1: Bắt các đáp án TRƯỚC (thêm .first() để bắt chính xác thằng đầu tiên thấy)
-      const optionsTextArray = [];
-      const opt1 = page.getByText(/^1\./).first();
-      const opt2 = page.getByText(/^2\./).first();
-      const opt3 = page.getByText(/^3\./).first();
-      const opt4 = page.getByText(/^4\./).first();
-    /*
-        // Chờ đáp án 1 xuất hiện để chắc chắn nội dung câu hỏi cũng đã load xong
-        await opt1.waitFor({ state: 'visible', timeout: 5000 }).catch(() => { });
-
-        if (await opt1.isVisible()) optionsTextArray.push(await opt1.innerText());
-        if (await opt2.isVisible()) optionsTextArray.push(await opt2.innerText());
-        if (await opt3.isVisible()) optionsTextArray.push(await opt3.innerText());
-        if (await opt4.isVisible()) optionsTextArray.push(await opt4.innerText());
-
-        // BƯỚC 2: Lấy nội dung câu hỏi bằng kỹ thuật "Cắt bánh mì kẹp thịt"
-        let questionText = "Chưa lấy được nội dung";
-
-        if (optionsTextArray.length > 0) {
-            // Lấy TẤT CẢ chữ đang hiển thị trên trình duyệt
-            const bodyText = await page.innerText('body');
-
-            const startMarker = `Câu ${i}`;
-            const endMarker = optionsTextArray[0]; // Mốc kết thúc chính là nội dung đáp án 1 (VD: "1. Dừng lại...")
-
-            // Tìm vị trí của "Câu i" và "Đáp án 1" trong đống text đó
-            const startIdx = bodyText.indexOf(startMarker);
-            const endIdx = bodyText.indexOf(endMarker, startIdx);
-
-            if (startIdx !== -1 && endIdx !== -1) {
-                // Cắt lấy phần ruột ở giữa và dùng trim() để dọn dẹp khoảng trắng thừa/dấu xuống dòng
-                questionText = bodyText.substring(startIdx + startMarker.length, endIdx).trim();
-            }
+        const questionVisible = await waitForQuestion(page, questionNumber, 5000);
+        if (!questionVisible) {
+          console.log(`Khong tim thay cau ${questionNumber}, dung lai de tranh chay qua so cau thuc te.`);
+          break;
         }
 
-        results.push({
-            id: i,
-            question: questionText,
-            options: optionsTextArray,
-            selectedAnswer: 1
-        });
+        await clickFirstAnswer(page);
+        answeredCount += 1;
 
-        // Ghi đè file JSON liên tục
-        fs.writeFileSync('cau_hoi_phap_luat.json', JSON.stringify(results, null, 2), 'utf-8');
-        */
-      if (await opt1.isVisible()) {
-        await opt1.click();
-      }
+        const movedToNextQuestion = await clickNextAndWait(page, questionNumber + 1);
+        if (!movedToNextQuestion) {
+          const finishedAllKnownQuestions = totalQuestions
+            ? answeredCount >= totalQuestions
+            : false;
 
-      answeredCount += 1;
+          if (finishedAllKnownQuestions) {
+            console.log("Da lam du tong so cau, cho phep tu dong nop bai.");
+            canAutoSubmit = true;
+          } else if (!await hasControlByNormalizedText(page, ["luu cau tra loi va tiep tuc", "luu va tiep tuc", "tiep tuc"])) {
+            console.log("Nut chuyen cau chua san sang nhung chua du so cau. Dung an toan, khong tu nop.");
+          } else {
+            console.log("Bam tiep tuc nhung chua sang duoc cau moi. Dung an toan de kiem tra lai.");
+          }
+          break;
+        }
 
-      const nextButton = page.getByText("Lưu câu trả lời và tiếp tục", {
-        exact: false,
-      });
+        questionNumber += 1;
 
-      let hasNextButton = (await nextButton.count()) > 0;
-      let nextButtonVisible = hasNextButton
-        ? await nextButton.isVisible().catch(() => false)
-        : false;
-      let nextButtonEnabled = hasNextButton && nextButtonVisible
-        ? await nextButton.isEnabled().catch(() => false)
-        : false;
-
-      if (!hasNextButton || !nextButtonVisible || !nextButtonEnabled) {
-        // Tránh kết luận quá sớm ở lúc UI đang chuyển trạng thái giữa 2 câu.
-        await page.waitForTimeout(1500);
-        hasNextButton = (await nextButton.count()) > 0;
-        nextButtonVisible = hasNextButton
-          ? await nextButton.isVisible().catch(() => false)
-          : false;
-        nextButtonEnabled = hasNextButton && nextButtonVisible
-          ? await nextButton.isEnabled().catch(() => false)
-          : false;
-      }
-
-      if (!hasNextButton || !nextButtonVisible || !nextButtonEnabled) {
-        const finishedAllKnownQuestions = totalQuestions
-          ? answeredCount >= totalQuestions
-          : false;
-
-        if (finishedAllKnownQuestions) {
-          console.log("Đã làm đủ tổng số câu, cho phép tự động nộp bài.");
+        if (totalQuestions && questionNumber > totalQuestions) {
+          console.log("Da dat tong so cau du kien, thoat vong lap.");
           canAutoSubmit = true;
-        } else {
-          console.log("Nút chuyển câu chưa sẵn sàng nhưng chưa đủ số câu. Dừng an toàn, KHÔNG tự nộp.");
+          break;
         }
-        break;
-      }
-
-      await nextButton.click({ noWaitAfter: true });
-      await page.waitForTimeout(500);
-
-      const nextQuestionPattern = new RegExp(
-        `Câu(?:\\s+hỏi)?\\s*${i + 1}(?:\\s*\\/\\s*\\d+)?`,
-        "i",
-      );
-      const movedToNextQuestion = await page
-        .getByText(nextQuestionPattern)
-        .first()
-        .waitFor({ state: "visible", timeout: 4000 })
-        .then(() => true)
-        .catch(() => false);
-
-      if (!movedToNextQuestion) {
-        const finishedAllKnownQuestions = totalQuestions
-          ? answeredCount >= totalQuestions
-          : false;
-
-        if (finishedAllKnownQuestions) {
-          console.log("Không còn sang được câu kế, coi như đã tới câu cuối.");
-          canAutoSubmit = true;
-        } else {
-          console.log("Bấm tiếp tục nhưng chưa sang được câu mới. Dừng an toàn để bạn kiểm tra lại.");
-        }
-        break;
-      }
-
-      i += 1;
-
-      if (totalQuestions && i > totalQuestions) {
-        console.log("Đã đạt tổng số câu dự kiến, thoát vòng lặp.");
-        canAutoSubmit = true;
-        break;
-      }
       }
 
       console.log(`Da xu ly tong cong ${answeredCount} cau.`);
 
-      console.log("🎉 Đã cào xong! Dữ liệu an toàn tại cau_hoi_phap_luat.json");
+      const safeToAutoSubmit = totalQuestions
+        ? answeredCount >= totalQuestions
+        : canAutoSubmit;
 
-      // Tìm và click button "Nộp bài"
-      const submitButton = page.getByText("Nộp bài", { exact: true });
-      const safeToAutoSubmit = totalQuestions ? answeredCount >= totalQuestions : canAutoSubmit;
-      if (canAutoSubmit && safeToAutoSubmit && answeredCount > 0 && (await submitButton.isVisible())) {
-        console.log("Đang bấm nộp bài...");
-        await submitButton.click();
-        await page.waitForTimeout(2000); // Chờ 2 giây để nộp bài hoàn tất
-        console.log("✅ Đã nộp bài thành công!");
+      if (
+        canAutoSubmit
+        && safeToAutoSubmit
+        && answeredCount > 0
+        && await hasControlByNormalizedText(page, ["nop bai"])
+      ) {
+        console.log("Dang bam nop bai...");
+        await clickControlByNormalizedText(page, ["nop bai"], { timeout: 3000 });
+        await page.waitForLoadState("domcontentloaded").catch(() => {});
+        console.log("Da nop bai thanh cong.");
 
-        // Sau khi nộp bài, thử bấm nút chuyển sang đề tiếp theo nếu có
-        const continueButton = page
-          .getByRole("button", {
-            name: /^(tiếp tục|làm đề tiếp theo|đề tiếp theo|tiếp tục làm bài)$/i,
-          })
-          .first();
+        const hasContinueButton = await hasControlByNormalizedText(page, [
+          "tiep tuc",
+          "lam de tiep theo",
+          "de tiep theo",
+          "tiep tuc lam bai",
+        ]);
 
-        const hasContinueButton = (await continueButton.count()) > 0;
         if (hasContinueButton) {
-          const continueVisible = await continueButton.isVisible().catch(() => false);
-          const continueEnabled = await continueButton.isEnabled().catch(() => false);
-          if (continueVisible && continueEnabled) {
-            console.log("Đang bấm nút tiếp tục để làm đề tiếp theo...");
-            await continueButton.click();
-            await page.waitForLoadState("domcontentloaded");
-            console.log("✅ Đã chuyển sang màn hình đề tiếp theo, bắt đầu lại từ Câu 1.");
-            console.log("Nếu trang cần thao tác thêm, hãy bấm Resume khi sẵn sàng.");
-            await page.pause();
-            quizRound += 1;
-            continue;
-          }
+          console.log("Dang bam nut tiep tuc de lam de tiep theo...");
+          await clickControlByNormalizedText(page, [
+            "lam de tiep theo",
+            "de tiep theo",
+            "tiep tuc lam bai",
+            "tiep tuc",
+          ], { timeout: 3000 });
+          await page.waitForLoadState("domcontentloaded");
+          console.log("Da chuyen sang man hinh de tiep theo, bat dau lai tu cau 1.");
+          console.log("Neu trang can thao tac them, hay bam Resume khi san sang.");
+          await page.pause();
+          quizRound += 1;
+          continue;
         }
       } else {
-        console.log("⚠️ Chưa đủ điều kiện auto nộp bài (có thể bạn đang ở giữa đề hoặc chưa làm câu nào).");
+        console.log("Chua du dieu kien auto nop bai.");
       }
 
       break;
-    } catch (err) {
-      console.log(`❌ Gặp lỗi ở đề ${quizRound}: ${err.message}`);
-      console.log("Hãy quay lại đề, vào Câu 1 rồi bấm Resume để chạy lại đề hiện tại.");
+    } catch (error) {
+      console.log(`Gap loi o de ${quizRound}: ${error.message}`);
+      console.log("Hay quay lai de, vao cau 1 roi bam Resume de chay lai de hien tai.");
       await page.pause();
-      continue;
     }
   }
 
-  console.log("Trình duyệt sẽ tiếp tục mở. Đóng nó bằng tay khi cần.");
+  console.log("Trinh duyet se tiep tuc mo. Dong no bang tay khi can.");
 })();
