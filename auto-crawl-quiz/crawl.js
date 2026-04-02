@@ -17,7 +17,10 @@ async function getNormalizedBodyText(page) {
 }
 
 async function waitForQuestion(page, questionNumber, timeout = 5000) {
-  const pattern = new RegExp(`\\bcau(?: hoi)?\\s*${questionNumber}(?:\\s*/\\s*\\d+)?\\b`, "i");
+  const pattern = new RegExp(
+    `\\bcau(?: hoi)?\\s*${questionNumber}(?:\\s*/\\s*\\d+)?\\b`,
+    "i",
+  );
 
   return await page
     .waitForFunction(
@@ -64,7 +67,9 @@ async function clickFirstAnswer(page) {
 }
 
 async function clickControlByNormalizedText(page, phrases, options = {}) {
-  const controls = page.locator('button, a, [role="button"], input[type="button"], input[type="submit"]');
+  const controls = page.locator(
+    'button, a, [role="button"], input[type="button"], input[type="submit"]',
+  );
   const count = await controls.count();
 
   for (let index = 0; index < count; index += 1) {
@@ -93,7 +98,9 @@ async function clickControlByNormalizedText(page, phrases, options = {}) {
 }
 
 async function hasControlByNormalizedText(page, phrases) {
-  const controls = page.locator('button, a, [role="button"], input[type="button"], input[type="submit"]');
+  const controls = page.locator(
+    'button, a, [role="button"], input[type="button"], input[type="submit"]',
+  );
   const count = await controls.count();
 
   for (let index = 0; index < count; index += 1) {
@@ -144,7 +151,9 @@ async function clickNextAndWait(page, nextQuestionNumber) {
   const page = await context.newPage();
 
   console.log("Dang mo trang web...");
-  await page.goto("https://lms.uniapp.vn/elearning/student/test/128?m=549&c=82");
+  await page.goto(
+    "https://lms.uniapp.vn/elearning/student/test/128?m=549&c=82",
+  );
 
   console.log("--------------------------------------------------");
   console.log("Dang nhap va di den man hinh cau hoi so 1.");
@@ -165,7 +174,9 @@ async function clickNextAndWait(page, nextQuestionNumber) {
       if (totalQuestions) {
         console.log(`Tong so cau tu dong nhan dien: ${totalQuestions}`);
       } else {
-        console.log("Khong doc duoc tong so cau, se lam den khi khong con nut tiep tuc.");
+        console.log(
+          "Khong doc duoc tong so cau, se lam den khi khong con nut tiep tuc.",
+        );
       }
 
       let questionNumber = 1;
@@ -175,16 +186,25 @@ async function clickNextAndWait(page, nextQuestionNumber) {
       while (totalQuestions ? questionNumber <= totalQuestions : true) {
         console.log(`Dang xu ly cau ${questionNumber}...`);
 
-        const questionVisible = await waitForQuestion(page, questionNumber, 5000);
+        const questionVisible = await waitForQuestion(
+          page,
+          questionNumber,
+          5000,
+        );
         if (!questionVisible) {
-          console.log(`Khong tim thay cau ${questionNumber}, dung lai de tranh chay qua so cau thuc te.`);
+          console.log(
+            `Khong tim thay cau ${questionNumber}, dung lai de tranh chay qua so cau thuc te.`,
+          );
           break;
         }
 
         await clickFirstAnswer(page);
         answeredCount += 1;
 
-        const movedToNextQuestion = await clickNextAndWait(page, questionNumber + 1);
+        const movedToNextQuestion = await clickNextAndWait(
+          page,
+          questionNumber + 1,
+        );
         if (!movedToNextQuestion) {
           const finishedAllKnownQuestions = totalQuestions
             ? answeredCount >= totalQuestions
@@ -193,10 +213,20 @@ async function clickNextAndWait(page, nextQuestionNumber) {
           if (finishedAllKnownQuestions) {
             console.log("Da lam du tong so cau, cho phep tu dong nop bai.");
             canAutoSubmit = true;
-          } else if (!await hasControlByNormalizedText(page, ["luu cau tra loi va tiep tuc", "luu va tiep tuc", "tiep tuc"])) {
-            console.log("Nut chuyen cau chua san sang nhung chua du so cau. Dung an toan, khong tu nop.");
+          } else if (
+            !(await hasControlByNormalizedText(page, [
+              "luu cau tra loi va tiep tuc",
+              "luu va tiep tuc",
+              "tiep tuc",
+            ]))
+          ) {
+            console.log(
+              "Nut chuyen cau chua san sang nhung chua du so cau. Dung an toan, khong tu nop.",
+            );
           } else {
-            console.log("Bam tiep tuc nhung chua sang duoc cau moi. Dung an toan de kiem tra lai.");
+            console.log(
+              "Bam tiep tuc nhung chua sang duoc cau moi. Dung an toan de kiem tra lai.",
+            );
           }
           break;
         }
@@ -217,13 +247,15 @@ async function clickNextAndWait(page, nextQuestionNumber) {
         : canAutoSubmit;
 
       if (
-        canAutoSubmit
-        && safeToAutoSubmit
-        && answeredCount > 0
-        && await hasControlByNormalizedText(page, ["nop bai"])
+        canAutoSubmit &&
+        safeToAutoSubmit &&
+        answeredCount > 0 &&
+        (await hasControlByNormalizedText(page, ["nop bai"]))
       ) {
         console.log("Dang bam nop bai...");
-        await clickControlByNormalizedText(page, ["nop bai"], { timeout: 3000 });
+        await clickControlByNormalizedText(page, ["nop bai"], {
+          timeout: 3000,
+        });
         await page.waitForLoadState("domcontentloaded").catch(() => {});
         console.log("Da nop bai thanh cong.");
 
@@ -236,15 +268,23 @@ async function clickNextAndWait(page, nextQuestionNumber) {
 
         if (hasContinueButton) {
           console.log("Dang bam nut tiep tuc de lam de tiep theo...");
-          await clickControlByNormalizedText(page, [
-            "lam de tiep theo",
-            "de tiep theo",
-            "tiep tuc lam bai",
-            "tiep tuc",
-          ], { timeout: 3000 });
+          await clickControlByNormalizedText(
+            page,
+            [
+              "lam de tiep theo",
+              "de tiep theo",
+              "tiep tuc lam bai",
+              "tiep tuc",
+            ],
+            { timeout: 3000 },
+          );
           await page.waitForLoadState("domcontentloaded");
-          console.log("Da chuyen sang man hinh de tiep theo, bat dau lai tu cau 1.");
-          console.log("Neu trang can thao tac them, hay bam Resume khi san sang.");
+          console.log(
+            "Da chuyen sang man hinh de tiep theo, bat dau lai tu cau 1.",
+          );
+          console.log(
+            "Neu trang can thao tac them, hay bam Resume khi san sang.",
+          );
           await page.pause();
           quizRound += 1;
           continue;
@@ -256,7 +296,9 @@ async function clickNextAndWait(page, nextQuestionNumber) {
       break;
     } catch (error) {
       console.log(`Gap loi o de ${quizRound}: ${error.message}`);
-      console.log("Hay quay lai de, vao cau 1 roi bam Resume de chay lai de hien tai.");
+      console.log(
+        "Hay quay lai de, vao cau 1 roi bam Resume de chay lai de hien tai.",
+      );
       await page.pause();
     }
   }
